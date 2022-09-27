@@ -105,6 +105,8 @@ def main():
             "\n* Initialization done! Awaiting your command (-h for help, 'q' to quit)"
         )
 
+    
+
     cmd_parser = create_cmd_parser()
     if opt.web:
         dream_server_loop(t2i, opt.host, opt.port, opt.outdir)
