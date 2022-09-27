@@ -4,7 +4,6 @@ import argparse
 from concurrent.futures import thread
 from threading import Thread 
 import zmq
-import scripts.dreamv2 as dreamv2
 
 
 
@@ -13,13 +12,13 @@ import scripts.dreamv2 as dreamv2
 #TODO txt document solution
 
 def main():
-    arg_parser = create_argv_parser()
+    arg_parser = create_cmd_parser()
     opt = arg_parser.parse_args()
+    
     #create our listener
     thread1 = Thread(name="dream_listener", target=watch_dream())
 
-
-
+    import scripts.dreamv2 as dreamv2
     #http option 
 
     #create local context
@@ -30,13 +29,14 @@ def main():
 
     #create new iteration
     #continue with new iteration
-
+    print('Welcome to Dream Listener, this is currently running')
     
 
 
 
-def watch_dream():
+def watch_dream(debug=False):
     #listen for the object 
+    if debug: print('Running watch_dream()')
     pass
 
 
@@ -71,7 +71,17 @@ def create_cmd_parser():
         metavar='CONFIG_LOCATION',
         default='./cfg/cfg.json'
     )
+    parser.add_argument(
+        'dbg',
+        dest='debug',
+        metavar='DEBUG',
+        action='store_true',
+        default=False
+    )
     return parser
+
+def create_argv_parser():
+    pass
 
 
 

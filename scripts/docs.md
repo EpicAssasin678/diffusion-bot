@@ -33,4 +33,16 @@ Modes
 
 
 
+***
+Main loop 
+1 - use the dream_listener as a complete wrapper, only interacting with the dream script by using dream.py 
+2 - use the dream_listener in conjunction with dreamv2.py as a better method for communicating, mostly with the http and discord bot options 
+3 - 
+
+Notes
+- possible to use use cfg.json to also preload stdin for dreamv2's main_loop 
+
+
+
+
     

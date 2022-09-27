@@ -382,6 +382,8 @@ def write_log_message(results, log_path):
     with open(log_path, 'a', encoding='utf-8') as file:
         file.writelines(log_lines)
 
+def post_output_message():
+    pass 
 
 SAMPLER_CHOICES = [
     'ddim',
