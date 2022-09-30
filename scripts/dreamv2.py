@@ -2,6 +2,7 @@
 # Copyright (c) 2022 Lincoln D. Stein (https://github.com/lstein)
 
 import argparse
+from quopri import encodestring
 import shlex
 import os
 import re
@@ -10,6 +11,7 @@ import copy
 import warnings
 import time
 import ldm.dream.readline
+import zmq
 from ldm.dream.pngwriter import PngWriter, PromptFormatter
 from ldm.dream.server import DreamServer, ThreadingDreamServer
 from ldm.dream.image_util import make_grid
@@ -19,6 +21,127 @@ from omegaconf import OmegaConf
 # outputs and associates with the prompt that generated them.
 # Just want to get the formatting look right for now.
 output_cntr = 0
+
+def http_main(cmd, file=''):
+    """Initialize command-line parsers and the diffusion model"""
+
+    
+    arg_parser = create_argv_parser()
+    #check if given cmd args instead
+    if cmd:  
+        elements = shlex.split(cmd)
+        print(f'Command given for setup after strip:{elements}')
+        if elements[0].startswith(['main', 'args:']):
+            elements.pop(0)
+        switches = ['']
+        for el in elements:
+            switches.append(el)
+        opt = arg_parser.parse_args(cmd)
+    else:     
+        opt = arg_parser.parse_args()
+
+    if opt.laion400m:
+        print('--laion400m flag has been deprecated. Please use --model laion400m instead.')
+        sys.exit(-1)
+    if opt.weights != 'model':
+        print('--weights argument has been deprecated. Please configure ./configs/models.yaml, and call it using --model instead.')
+        sys.exit(-1)
+
+    try:
+        models = OmegaConf.load(opt.config)
+        width = models[opt.model].width
+        height = models[opt.model].height
+        config = models[opt.model].config
+        weights = models[opt.model].weights
+    except (FileNotFoundError, IOError, KeyError) as e:
+        print(f'{e}. Aborting.')
+        sys.exit(-1)
+
+    print('* Initializing, be patient...\n')
+    sys.path.append('.')
+
+    #create zmq context for listening
+    context = zmq.Context()
+    socket = context.socket()
+    socket.bind('texp://*:5555')
+
+    from pytorch_lightning import logging
+    from ldm.generate import Generate
+
+    # these two lines prevent a horrible warning message from appearing
+    # when the frozen CLIP tokenizer is imported
+    import transformers
+
+    transformers.logging.set_verbosity_error()
+
+    # creating a simple text2image object with a handful of
+    # defaults passed on the command line.
+    # additional parameters will be added (or overriden) during
+    # the user input loop
+    t2i = Generate(
+        width=width,
+        height=height,
+        sampler_name=opt.sampler_name,
+        weights=weights,
+        full_precision=opt.full_precision,
+        config=config,
+        grid=opt.grid,
+        # this is solely for recreating the prompt
+        seamless=opt.seamless,
+        embedding_path=opt.embedding_path,
+        device_type=opt.device,
+        ignore_ctrl_c=opt.infile is None,
+    )
+
+    # make sure the output directory exists
+    if not os.path.exists(opt.outdir):
+        os.makedirs(opt.outdir)
+
+    # gets rid of annoying messages about random seed
+    logging.getLogger('pytorch_lightning').setLevel(logging.ERROR)
+
+    # load the infile as a list of lines
+    # load the file specified 
+    infile = None
+    if file != '':
+        try:
+            if os.path.isfile(file):
+                infile = open(file, 'r', encoding='utf-8')
+            else:
+                raise FileNotFoundError(f'{file} not found')
+        except (FileNotFoundError) as e:
+            print(f'{e} Aborting.')
+            sys.exit(-1)
+    elif opt.infile:
+        try:
+            if os.path.isfile(opt.infile):
+                infile = open(opt.infile, 'r', encoding='utf-8')
+            elif opt.infile == '-':  # stdin
+                infile = sys.stdin
+            else:
+                raise FileNotFoundError(f'{opt.infile} not found.')
+        except (FileNotFoundError, IOError) as e:
+            print(f'{e}. Aborting.')
+            sys.exit(-1)
+
+    if opt.seamless:
+        print(">> changed to seamless tiling mode")
+
+    # preload the model
+    t2i.load_model()
+
+    if not infile:
+        print(
+            "\n* Initialization done! Awaiting your command (-h for help, 'q' to quit)"
+        )
+
+    cmd_parser = create_cmd_parser()
+    if opt.web:
+        dream_server_loop(t2i, opt.host, opt.port, opt.outdir)
+    else:
+        main_loop(t2i, opt.outdir, opt.prompt_as_dir, cmd_parser, infile)
+
+
 
 
 def main():
@@ -104,8 +227,6 @@ def main():
         print(
             "\n* Initialization done! Awaiting your command (-h for help, 'q' to quit)"
         )
-
-    
 
     cmd_parser = create_cmd_parser()
     if opt.web:
@@ -382,8 +503,11 @@ def write_log_message(results, log_path):
     with open(log_path, 'a', encoding='utf-8') as file:
         file.writelines(log_lines)
 
-def post_output_message():
-    pass 
+
+def log_POST(socket, string):
+    """posts pythobj to socket"""
+    
+    pass
 
 SAMPLER_CHOICES = [
     'ddim',
