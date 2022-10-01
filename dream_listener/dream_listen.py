@@ -5,8 +5,9 @@ import json
 import logging
 import math
 import os
-from random import random
+from random import Random as random
 import re
+import string
 import subprocess
 from concurrent.futures import thread
 import sys
@@ -44,7 +45,7 @@ def main():
     projectdir = f'{outdir}/id{projectid}'
     outdir += f'/id{projectid}' 
     
-    
+    defaults = cfgdata['defaults']
     #TODO add generation for resuming 
 
     
@@ -83,6 +84,7 @@ def main():
                 os.makedirs(outdir, exist_ok=True)
 
                 #monitor option
+                #create next prompt
 
                 #!start daemon
                 print(f'[generation{gen}]Starting dream on current gen in {outdir}...')
@@ -95,10 +97,14 @@ def main():
                 dream_output_string = dream_output_log.readline()
                 interpreted_output = interpret_output(outparser, dream_output_string)
                 
-                #create next prompt
+                #interpret outputs 
+                
                 #modify the next prompt location
                 
                 #modify the next prompt properties 
+
+                #todo ask if prompt is set
+                #todo implement adding images after prompt_string is created
 
 
 #generates a unique project id so that we don't have to
@@ -112,7 +118,7 @@ def generate_unique_genid(outdir):
     return f'{basecount:06}'
 
 
-def parse_output(parser, string=str):
+def parse_output(parser, string:str):
     
     #strip input string
     #outputs/img-samples\000001.1957557850.png: "an arm made of synthetic muscles" -s100 -W1024 -H960 -C7.5 -Ak_lms -S1957557850
@@ -124,7 +130,7 @@ def parse_output(parser, string=str):
     return parser.parse_args(parse_str)
 
 
-def interpret_output(parser, string=str):
+def interpret_output(parser, string:str):
     #create new_command -> writes command to file
     #strip input string
     #outputs/img-samples\000001.1957557850.png: "an arm made of synthetic muscles" -s100 -W1024 -H960 -C7.5 -Ak_lms -S1957557850
@@ -144,44 +150,101 @@ def interpret_output(parser, string=str):
     return [options, prompt, path]
 
 
-def construct_new_prompt(args, parser, prompt_dir, cfg, gen, fully_constructed=False, mode=0):
-    #0 -> constructive, 1 -> absolute
+
+def construct_new_prompt(parser, prompt_dir, cfg, gen, fully_constructed=False):
+    """Send last parser through -> generates new prompt, changes in cfg will apply changes to
+    a new prompt command. Note: may encounter issue with paths of IMGs from output. """
     #[iterations, steps, width, height, strength, variation, init_img, seed, {variations}]
     s = ['-n', '-s', '-W', '-H', '-f', '-v', '-I', '-S', '-V']
+    
     prompt_str = ' '
+    #if we don't have a previous generation
     if gen == 1:
+        #we don't have a previous image or seed to refine to 
         prompt_str = open(prompt_dir).readline()
-    elif not fully_constructed and mode==0:
-        defaults = cfg['defaults']
+        print(f'Prompt generation successful. Detected first generation, setting prompt to:\n{prompt_str}')
+        return prompt_str
+    #if we have a new generation
+    else:
         last_prompt = parser.parse(open(prompt_dir).readline())
-        prompt_arr = [f'{args[1]} ']
-        last_input = args[0]
-        #use input for last prompt
-        cout = 0
-        for setting in defaults:
-            if setting == None: prompt_arr.append(f'{s[cout]}{setting}')
-            else:
-                match s[cout]:
-                    case '-n':
-                        if last_prompt.iterations == args[0].iterations: prompt_arr.append( f'{s[cout]}{args[0].iterations} ')
-                    case '-s':
-                        prompt_arr.append(  f'{s[cout]}{args[0].steps} ')
-                    case '-W':
-                        prompt_arr.append(f'{s[cout]}{args[0].width} ')
-                    case '-H':
-                        prompt_arr.append(f'{s[cout]}{args[0].height} ')
-                    case '-f':
-                        prompt_arr.append(f'{s[cout]}{args[0].strength} ')
-                    case '-v':
-                        prompt_arr.append(f'{s[cout]}{args[0].variation} ')
-            cout += 1
-            
-            #!add method of appending init_img and seed
-        #allow us to say this command has been fully constructed
-        fully_constructed = True
-        prompt_str
-        pass
+        ls = [
+        last_prompt.iterations,
+        last_prompt.steps,
+        last_prompt.steps,
+        last_prompt.width,
+        last_prompt.height,
+        last_prompt.strength,
+        last_prompt.variation,
+        last_prompt.init_img,
+        last_prompt.seed, 
+        last_prompt.variations]
+        prompt_str = f'{last_prompt.prompt}'
+        #if changes need to be made to the prompt 
+        if not fully_constructed:
+            print('Found not to be fully constructed.')
+            cout = 0
+            for setting in cfg:
+                if setting != None and setting != ls[cout]: 
+                    prompt_str += f'{s[cout]}{setting}'
+                else:
+                    prompt_str += f'{s[cout]}{ls[cout]}'
+                cout += 1
+                #!add method of appending init_img and seed
+            #allow us to say this command has been fully constructed
+            fully_constructed = True
+        #ask to select init_image and seed
+    print(f'Prompt generation successful. Setting prompt to:\n{prompt_str}')
     return prompt_str
+
+
+def change_configuration(cfg: dict, final_stage, interactive):
+    if (not final_stage) and interactive:
+        print('Choose configuration to change: ')
+        keys = cfg.keys()
+        for name, setting in cfg.items(): print(f'{name}={setting},type->{type(setting).__name__}')
+        
+        setting_selection = ''
+        while setting_selection != 'q':
+        
+            setting_selection = input(f'Specify desired setting(type name, q to quit): ')
+            if setting_selection == 'q': break
+            value_change = input(f'Value for setting: ')
+            try:
+                value_type = type(cfg[setting_selection]).__name__
+                match value_type:
+                    case 'str':
+                        cfg[setting_selection] = value_change
+                    case 'int':
+                        cfg[setting_selection] = int(value_change)
+                    case 'float':
+                        cfg[setting_selection] = float(value_change)
+
+            except Exception as e:
+                print(f'{value_type} couldn\'t be casted properly\n{e}')
+                break
+    print(f'Configuration changed.')
+    
+
+def choose_init_img(outdir, previous, interface, random_choice=True):
+    dirlist = sorted(os.listdir(outdir), reverse=True)
+    print(f'Choosing init_image.\nOutput directory of current generation.')
+    cout = 0
+    record = []
+    for path in dirlist:
+        print(f'[{cout}]{path}')
+        record.append(path)
+        cout+=1
+    if interface == 'http':
+        if not random_choice:
+            index = int(input(f'Choose your init_img by indice.'))
+            print(f'Chose init_img')
+            return record[index]
+        else:
+            print(f'Chose init_img randomly.')
+            return record[random.randrange(0, len(record) - 1)]
+
+    
+
 
 def watch_dream(debug=False):
     #listen for the object 
